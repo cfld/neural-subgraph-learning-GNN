@@ -28,9 +28,9 @@ import torch_geometric.nn as pyg_nn
 from common import data
 from common import models
 from common import utils
-from subgraph_matching.config import parse_encoder
-from subgraph_matching.test import validation
-from subgraph_matching.train import build_model
+from config import parse_encoder
+from test import validation
+from train import build_model
 
 def gen_alignment_matrix(model, query, target, method_type="order"):
     """Generate subgraph matching alignment matrix for a given query and
@@ -76,27 +76,33 @@ def main():
         default="")
     args = parser.parse_args()
     args.test = True
+    
+    model = build_model(args)
+
     if args.query_path:
         with open(args.query_path, "rb") as f:
             query = pickle.load(f)
     else:
         query = nx.gnp_random_graph(8, 0.25)
-    if args.target_path:
-        with open(args.target_path, "rb") as f:
-            target = pickle.load(f)
-    else:
-        target = nx.gnp_random_graph(16, 0.25)
 
-    model = build_model(args)
-    mat = gen_alignment_matrix(model, query, target,
-        method_type=args.method_type)
+    for ct in [8, 16, 64, 128, 256, 512, 1024]:
+        if args.target_path:
+            with open(args.target_path, "rb") as f:
+                target = pickle.load(f)
+        else:
+            target = nx.gnp_random_graph(ct, 0.25)
 
-    np.save("results/alignment.npy", mat)
-    print("Saved alignment matrix in results/alignment.npy")
 
-    plt.imshow(mat, interpolation="nearest")
-    plt.savefig("plots/alignment.png")
-    print("Saved alignment matrix plot in plots/alignment.png")
+        tt = time.time()
+        mat = gen_alignment_matrix(model, query, target, method_type=args.method_type)
+        print(ct, time.time() - tt)
+
+        # np.save("results/alignment.npy", mat)
+        # print("Saved alignment matrix in results/alignment.npy")
+
+        # plt.imshow(mat, interpolation="nearest")
+        # plt.savefig("plots/alignment.png")
+        # print("Saved alignment matrix plot in plots/alignment.png")
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
