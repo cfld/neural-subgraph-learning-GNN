@@ -36,8 +36,8 @@ if HYPERPARAM_SEARCH:
     from test_tube import HyperOptArgumentParser
     from subgraph_matching.hyp_search import parse_encoder
 else:
-    from subgraph_matching.config import parse_encoder
-from subgraph_matching.test import validation
+    from config import parse_encoder
+from test import validation
 
 def build_model(args):
     # build model
@@ -47,28 +47,23 @@ def build_model(args):
         model = models.BaselineMLP(1, args.hidden_dim, args)
     model.to(utils.get_device())
     if args.test and args.model_path:
-        model.load_state_dict(torch.load(args.model_path,
-            map_location=utils.get_device()))
+        model.load_state_dict(torch.load(args.model_path, map_location=utils.get_device()))
     return model
 
 def make_data_source(args):
     toks = args.dataset.split("-")
     if toks[0] == "syn":
         if len(toks) == 1 or toks[1] == "balanced":
-            data_source = data.OTFSynDataSource(
-                node_anchored=args.node_anchored)
+            data_source = data.OTFSynDataSource(node_anchored=args.node_anchored)
         elif toks[1] == "imbalanced":
-            data_source = data.OTFSynImbalancedDataSource(
-                node_anchored=args.node_anchored)
+            data_source = data.OTFSynImbalancedDataSource(node_anchored=args.node_anchored)
         else:
             raise Exception("Error: unrecognized dataset")
     else:
         if len(toks) == 1 or toks[1] == "balanced":
-            data_source = data.DiskDataSource(toks[0],
-                node_anchored=args.node_anchored)
+            data_source = data.DiskDataSource(toks[0], node_anchored=args.node_anchored)
         elif toks[1] == "imbalanced":
-            data_source = data.DiskImbalancedDataSource(toks[0],
-                node_anchored=args.node_anchored)
+            data_source = data.DiskImbalancedDataSource(toks[0], node_anchored=args.node_anchored)
         else:
             raise Exception("Error: unrecognized dataset")
     return data_source
@@ -88,8 +83,8 @@ def train(args, model, logger, in_queue, out_queue):
     done = False
     while not done:
         data_source = make_data_source(args)
-        loaders = data_source.gen_data_loaders(args.eval_interval *
-            args.batch_size, args.batch_size, train=True)
+        loaders     = data_source.gen_data_loaders(args.eval_interval * args.batch_size, args.batch_size, train=True)
+        
         for batch_target, batch_neg_target, batch_neg_query in zip(*loaders):
             msg, _ = in_queue.get()
             if msg == "done":
@@ -181,8 +176,11 @@ def train_loop(args):
     if args.test:
         validation(args, model, test_pts, logger, 0, 0, verbose=True)
     else:
+        
         batch_n = 0
         for epoch in range(args.n_batches // args.eval_interval):
+            print('starting batch')
+            t = time.time()
             for i in range(args.eval_interval):
                 in_queue.put(("step", None))
             for i in range(args.eval_interval):
@@ -193,6 +191,8 @@ def train_loop(args):
                 logger.add_scalar("Loss/train", train_loss, batch_n)
                 logger.add_scalar("Accuracy/train", train_acc, batch_n)
                 batch_n += 1
+            print('finished epoch')
+            print('time', time.time() - t)
             validation(args, model, test_pts, logger, batch_n, epoch)
 
     for i in range(args.n_workers):

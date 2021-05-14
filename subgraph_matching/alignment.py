@@ -31,6 +31,15 @@ from common import utils
 from config import parse_encoder
 from test import validation
 from train import build_model
+import itertools
+from matplotlib.patches import Patch
+
+
+import faiss
+
+
+def to_numpy(x):
+    return x.detach().cpu().numpy()
 
 def gen_alignment_matrix(model, query, target, method_type="order"):
     """Generate subgraph matching alignment matrix for a given query and
@@ -47,6 +56,35 @@ def gen_alignment_matrix(model, query, target, method_type="order"):
             "order" for order embedding or "mlp" for MLP model
     """
 
+    tt = time.time()
+    e_q, e_v = [], []
+    for i, u in enumerate(query.nodes):
+        batch = utils.batch_nx_graphs([query], anchors=[u])
+        e_q.append(to_numpy(model.emb_model(batch)))
+
+    for i, v in enumerate(target.nodes):
+        batch = utils.batch_nx_graphs([target], anchors=[v])
+        e_v.append(to_numpy(model.emb_model(batch)))
+    
+    tt_emb = (time.time() - tt)
+
+    tt = time.time()
+    for u,v in itertools.product(e_q, e_v):
+        u = torch.Tensor(u).to('cuda')
+        v = torch.Tensor(v).to('cuda')
+        raw_pred = torch.log(model.predict([u, v]))
+    tt_pointwise = (time.time() - tt) + tt_emb
+
+
+    tt = time.time()
+    d = np.concatenate(e_v, axis=0)
+    index = faiss.IndexFlatL2(d.shape[1])
+    index.add(d)
+    xq = np.concatenate(e_q, axis=0)
+    D, I = index.search(xq, 1)
+    tt_faiss = (time.time() - tt) + tt_emb
+
+    tt = time.time()
     mat = np.zeros((len(query), len(target)))
     for i, u in enumerate(query.nodes):
         for j, v in enumerate(target.nodes):
@@ -59,7 +97,9 @@ def gen_alignment_matrix(model, query, target, method_type="order"):
             elif method_type == "mlp":
                 raw_pred = raw_pred[0][1]
             mat[i][j] = raw_pred.item()
-    return mat
+
+    tt_old = (time.time() - tt)
+    return mat, tt_pointwise, tt_faiss, tt_old
 
 def main():
     if not os.path.exists("plots/"):
@@ -79,23 +119,36 @@ def main():
     
     model = build_model(args)
 
-    if args.query_path:
-        with open(args.query_path, "rb") as f:
-            query = pickle.load(f)
-    else:
-        query = nx.gnp_random_graph(8, 0.25)
 
-    for ct in [8, 16, 64, 128, 256, 512, 1024]:
-        if args.target_path:
-            with open(args.target_path, "rb") as f:
-                target = pickle.load(f)
-        else:
+    counts = [16, 64, 128, 256, 512]
+    q_count = [8]
+    fig, ax = plt.subplots(1,len(q_count), figsize=(8,8))
+    for q_idx, q in enumerate(q_count):
+        t_pointwise, t_faiss, t_old = [], [], []
+        for ct in counts:
             target = nx.gnp_random_graph(ct, 0.25)
+            query = nx.gnp_random_graph(q, 0.25)
 
+            mat,  tt_pointwise, tt_faiss, tt_old = gen_alignment_matrix(model, query, target, method_type=args.method_type)
+            print("CT", ct, tt_pointwise, tt_faiss, tt_old)
+            t_pointwise.append(tt_pointwise)
+            t_faiss.append(tt_faiss)
+            t_old.append(tt_old)
+            
+        
+        ax.plot(counts, t_pointwise, c='r')
+        ax.plot(counts, t_faiss, c='b')
+        ax.plot(counts, t_old, c='g')
+    legend_elements = [
+        Patch(facecolor='r', edgecolor='r', label='pointwise'),
+        Patch(facecolor='b', edgecolor='b', label='ANN'),
+        Patch(facecolor='g', edgecolor='g', label='orig. implementation')
+        ]
+    plt.ylabel("time (s)")
+    plt.xlabel("size of target graph")
+    plt.legend(handles=legend_elements, loc='lower right')
+    fig.savefig("plots/alignment.png")
 
-        tt = time.time()
-        mat = gen_alignment_matrix(model, query, target, method_type=args.method_type)
-        print(ct, time.time() - tt)
 
         # np.save("results/alignment.npy", mat)
         # print("Saved alignment matrix in results/alignment.npy")

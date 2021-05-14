@@ -1,13 +1,14 @@
 
-import argparse
+
+import json
 import random
+import argparse
 import numpy as np
 from tqdm import tqdm
 import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
-
 
 from common import data
 from common import models
@@ -32,7 +33,7 @@ def parse_args():
     # data
     parser.add_argument("--seed",       type=int, default=0)
     parser.add_argument("--dataset",    type=str, default='syn-balanced')
-    parser.add_argument("--batch_size",   type=int, default=16)
+    parser.add_argument("--batch_size",   type=int, default=128)
     parser.add_argument("--n_batches",    type=int, default=1_000_000)
     parser.add_argument("--eval_interval", type=int, default=10)
 
@@ -72,8 +73,8 @@ clf_crit  = nn.NLLLoss()
 # - 
 # data
 
-ds_train = data.DiskDataSource("reddit-binary", node_anchored=args.node_anchored)
-#ds_train = data.OTFSynDataSource(node_anchored=args.node_anchored)
+#ds_train = data.DiskDataSource("reddit-binary", node_anchored=args.node_anchored)
+ds_train = data.OTFSynDataSource(node_anchored=args.node_anchored)
 loaders_train = ds_train.gen_data_loaders(
     size        = args.eval_interval * args.batch_size, 
     batch_size  = args.batch_size, 
@@ -207,13 +208,18 @@ for epoch in range(args.n_batches // args.eval_interval):
     torch.cuda.synchronize()
     t_total += (start_all.elapsed_time(end_all) / 100)    
     t_overhead = t_total - (t_gen_batch + t_embed_samples + t_predict_subgraphs + t_compute_loss + t_compute_loss_cls)
-    print("gen_batch", t_gen_batch / t_total)
-    print("embed", t_embed_samples / t_total) 
-    print("pred_subg", t_predict_subgraphs / t_total)
-    print("t_compute_losss", t_compute_loss / t_total)
-    print("t_compute_clsloss", t_compute_loss_cls / t_total)
-    print("t_overhead (get data)", t_overhead / t_total)
-
+    
+    timings = {
+        "gen_batch": t_gen_batch / t_total,
+        "embed": t_embed_samples / t_total,
+        "pred_subg": t_predict_subgraphs / t_total,
+        "t_compute_losss": t_compute_loss / t_total,
+        "t_compute_clsloss": t_compute_loss_cls / t_total,
+        "t_overhead (get data)": t_overhead / t_total
+    }
+    with open(f'timings_{args.batch_size}.json', 'w') as f:
+        json.dump(timings, f)
+    print(timings)
     
     # val
     #validation(args, model, test_pts, logger, batch_n, epoch)
